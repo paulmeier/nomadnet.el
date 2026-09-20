@@ -37,7 +37,7 @@
 ;;   reticulum-transport  path table, dispatch, receipts, path requests
 ;;   reticulum-link       links, requests, responses, keepalives
 ;;   reticulum-resource   inbound resources
-;;   reticulum-bz2        bzip2 via the system utility
+;;   reticulum-bz2        bzip2 decoder in Lisp (optionally the system utility)
 ;;
 ;; Typical use:
 ;;   (require 'reticulum)
