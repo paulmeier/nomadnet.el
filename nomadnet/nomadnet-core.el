@@ -72,6 +72,10 @@ is a plist with keyword keys."
 (defconst nomadnet-hash-length 32
   "Length in hex characters of a Reticulum destination hash.")
 
+(defconst nomadnet-request-too-large-prefix "Request too large"
+  "Prefix of the error reported when a page request does not fit one packet.
+The browser recognises it to keep the current page and its field values.")
+
 ;;;; Backend lifecycle
 
 (defvar nomadnet--next-id 0)

@@ -28,6 +28,7 @@
 
 (require 'nomadnet-core)
 (require 'nomadnet-micron)
+(require 'face-remap)
 
 (defgroup nomadnet-browser nil
   "Browser for Nomad Network nodes."
@@ -187,6 +188,7 @@ DESTINATION may be nil for URLs relative to the current node."
 (defun nomadnet-browser--show-message (text)
   "Replace the page with TEXT."
   (let ((inhibit-read-only t))
+    (nomadnet-browser--clear-page-colors)
     (erase-buffer)
     (insert "\n\n" (propertize text 'face 'shadow) "\n")))
 
@@ -241,12 +243,27 @@ DESTINATION may be nil for URLs relative to the current node."
       (push (cdr pair) out))
     (nreverse out)))
 
+(defun nomadnet-browser--keep-page-on-error-p (err)
+  "Return non-nil when failure ERR should leave the current page in place.
+A submission that does not fit in one packet fails before anything is
+sent, so the page and its field values stay valid and the user can
+shorten the values and submit again."
+  (and (stringp err)
+       (string-prefix-p nomadnet-request-too-large-prefix err)))
+
 (defun nomadnet-browser--load-failed (dest path err)
   "Show failure ERR for DEST and PATH."
   (setq nomadnet-browser--reloading nil
         nomadnet-browser--history-nav nil)
   (nomadnet-browser--set-status (format "Failed: %s" err))
+  (if (and nomadnet-browser--markup (nomadnet-browser--keep-page-on-error-p err))
+      (message "Nomad Network browser: %s" err)
+    (nomadnet-browser--show-error-page dest path err)))
+
+(defun nomadnet-browser--show-error-page (dest path err)
+  "Replace the page with the failure ERR for DEST and PATH."
   (let ((inhibit-read-only t))
+    (nomadnet-browser--clear-page-colors)
     (erase-buffer)
     (insert "\n\n  " (propertize "!" 'face 'error) "\n\n")
     (insert (format "  Could not load %s:%s\n\n  %s\n\n" dest path err))
@@ -290,12 +307,39 @@ DESTINATION may be nil for URLs relative to the current node."
       (when anchor (nomadnet-micron-jump-to-anchor anchor)))
     (nomadnet-browser--start-partials)))
 
+(defvar-local nomadnet-browser--color-cookies nil
+  "Face remapping cookies applying the page colours to the whole buffer.")
+
+(defun nomadnet-browser--clear-page-colors ()
+  "Remove page colours applied to the buffer background and text."
+  (dolist (cookie nomadnet-browser--color-cookies)
+    (face-remap-remove-relative cookie))
+  (setq nomadnet-browser--color-cookies nil))
+
+(defun nomadnet-browser--apply-page-colors (fg bg)
+  "Apply page colour specs FG and BG to the whole buffer.
+Micron pages declare them with #!fg= and #!bg= headers; nomadnet paints
+the entire page area with them, not just the text, so remap the default
+face of the buffer accordingly.  A nil spec leaves that colour alone."
+  (nomadnet-browser--clear-page-colors)
+  (let ((fg (nomadnet-micron-color fg))
+        (bg (nomadnet-micron-color bg)))
+    (when fg
+      (push (face-remap-add-relative 'default :foreground fg) nomadnet-browser--color-cookies))
+    (when bg
+      (push (face-remap-add-relative 'default :background bg) nomadnet-browser--color-cookies)
+      ;; Fringes and the header line would otherwise keep the theme colours
+      ;; and frame the page.
+      (push (face-remap-add-relative 'fringe :background bg) nomadnet-browser--color-cookies)
+      (push (face-remap-add-relative 'header-line :background bg) nomadnet-browser--color-cookies))))
+
 (defun nomadnet-browser--render ()
   "Render the current markup into the buffer."
   (let ((inhibit-read-only t)
         (colors (nomadnet-micron-page-colors nomadnet-browser--markup)))
     (setq nomadnet-browser--page-fg (car colors)
           nomadnet-browser--page-bg (cdr colors))
+    (nomadnet-browser--apply-page-colors nomadnet-browser--page-fg nomadnet-browser--page-bg)
     (erase-buffer)
     (let ((rendered (nomadnet-micron-render nomadnet-browser--markup
                                             nomadnet-browser--page-fg

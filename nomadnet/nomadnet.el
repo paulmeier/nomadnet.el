@@ -96,11 +96,47 @@
   "Insert a dashboard line for KEY and DESCRIPTION."
   (insert (format "  %-4s %s\n" (propertize key 'face 'help-key-binding) description)))
 
+(defface nomadnet-interface-online-face '((t :inherit success))
+  "Face for interfaces that are connected.")
+(defface nomadnet-interface-offline-face '((t :inherit error))
+  "Face for interfaces that are not connected.")
+
+(defun nomadnet--dashboard-interface-line (interface)
+  "Return the dashboard line describing INTERFACE plist.
+INTERFACE has :name, :online, :rx and :tx packet counts and, when the
+backend reports them, :rxbytes and :txbytes."
+  (let ((online (plist-get interface :online))
+        (rxbytes (plist-get interface :rxbytes))
+        (txbytes (plist-get interface :txbytes)))
+    (format "    %-24s %s  ↓%s ↑%s\n"
+            (plist-get interface :name)
+            (if online
+                (propertize "online " 'face 'nomadnet-interface-online-face)
+              (propertize "offline" 'face 'nomadnet-interface-offline-face))
+            (if (numberp rxbytes)
+                (nomadnet-format-size rxbytes)
+              (format "%d pkts" (or (plist-get interface :rx) 0)))
+            (if (numberp txbytes)
+                (nomadnet-format-size txbytes)
+              (format "%d pkts" (or (plist-get interface :tx) 0))))))
+
+(defun nomadnet--dashboard-insert-interfaces (interfaces)
+  "Insert the Interfaces section for the INTERFACES list, like nomadnet's."
+  (insert "\n")
+  (if (null interfaces)
+      (insert "  Interfaces     : none configured\n")
+    (insert (format "  Interfaces     : %d online of %d\n"
+                    (cl-count-if (lambda (i) (plist-get i :online)) interfaces)
+                    (length interfaces)))
+    (dolist (interface interfaces)
+      (insert (nomadnet--dashboard-interface-line interface)))))
+
 (defun nomadnet-dashboard-refresh ()
   "Refresh the dashboard buffer."
   (interactive)
   (with-current-buffer (get-buffer-create "*NomadNet*")
     (let ((inhibit-read-only t)
+          (pos (point))
           (status (and (nomadnet-ready-p) (ignore-errors (nomadnet-status))))
           (node (and (nomadnet-ready-p) (ignore-errors (nomadnet-call "node.info" nil 5))))
           (sync (and (nomadnet-ready-p) (ignore-errors (nomadnet-call "lxmf.sync_status" nil 5)))))
@@ -133,7 +169,8 @@
         (insert (format "  Versions       : nomadnet %s, RNS %s, LXMF %s\n"
                         (plist-get status :version) (plist-get status :rns_version)
                         (plist-get status :lxmf_version)))
-        (insert (format "  Config         : %s\n" (plist-get status :configdir)))))
+        (insert (format "  Config         : %s\n" (plist-get status :configdir)))
+        (nomadnet--dashboard-insert-interfaces (plist-get status :interfaces))))
       (insert "\n")
       (nomadnet--dashboard-line "c" "Conversations")
       (nomadnet--dashboard-line "a" "Announce stream")
@@ -151,7 +188,33 @@
       (nomadnet--dashboard-line "R" "Restart")
       (nomadnet--dashboard-line "Q" "Stop")
       (nomadnet--dashboard-line "q" "Quit window")
-      (goto-char (point-min)))))
+      (goto-char (min pos (point-max))))))
+
+(defcustom nomadnet-dashboard-refresh-interval 10
+  "Seconds between automatic refreshes of the dashboard while it is displayed.
+The interface status and transfer counters update at this rate.  Set to
+nil to refresh only on demand with \\<nomadnet-dashboard-mode-map>\\[nomadnet-dashboard-refresh]."
+  :type '(choice (const :tag "Manual only" nil) integer)
+  :group 'nomadnet)
+
+(defvar nomadnet--dashboard-timer nil "Timer refreshing the displayed dashboard.")
+
+(defun nomadnet--dashboard-tick ()
+  "Refresh the dashboard when it is displayed; stop the timer when it is gone."
+  (let ((buffer (get-buffer "*NomadNet*")))
+    (cond ((not (buffer-live-p buffer))
+           (when nomadnet--dashboard-timer
+             (cancel-timer nomadnet--dashboard-timer)
+             (setq nomadnet--dashboard-timer nil)))
+          ((and (get-buffer-window buffer t) (nomadnet-ready-p))
+           (nomadnet-dashboard-refresh)))))
+
+(defun nomadnet--dashboard-start-timer ()
+  "Start the dashboard refresh timer if enabled and not running."
+  (when (and nomadnet-dashboard-refresh-interval (null nomadnet--dashboard-timer))
+    (setq nomadnet--dashboard-timer
+          (run-at-time nomadnet-dashboard-refresh-interval nomadnet-dashboard-refresh-interval
+                       #'nomadnet--dashboard-tick))))
 
 ;;;###autoload
 (defun nomadnet ()
@@ -162,6 +225,7 @@
     (unless (derived-mode-p 'nomadnet-dashboard-mode)
       (nomadnet-dashboard-mode))
     (nomadnet-dashboard-refresh))
+  (nomadnet--dashboard-start-timer)
   (nomadnet-show-buffer "*NomadNet*"))
 
 (defun nomadnet--dashboard-on-change ()

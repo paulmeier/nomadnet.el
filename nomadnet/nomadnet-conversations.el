@@ -230,10 +230,13 @@ messages as micron, or `plain' to attach no renderer field."
    ("p" . nomadnet-conversation-previous-message) ("q" . quit-window)))
 
 (define-derived-mode nomadnet-conversation-mode special-mode "NomadNet-Conversation"
-  "Major mode showing the messages of one LXMF conversation."
+  "Major mode showing the messages of one LXMF conversation.
+Long messages are wrapped at word boundaries with `visual-line-mode'.
+\\<nomadnet-conversation-mode-map>\\[nomadnet-conversation-next-message] and \
+\\[nomadnet-conversation-previous-message] move between messages."
   (setq buffer-read-only t
-        truncate-lines nil
-        word-wrap t)
+        truncate-lines nil)
+  (visual-line-mode 1)
   (setq-local nomadnet-micron-link-function #'nomadnet-conversation--handle-link))
 
 (declare-function nomadnet-browser-load "nomadnet-browser" (url &optional request-data))
@@ -363,22 +366,33 @@ messages as micron, or `plain' to attach no renderer field."
   (or (get-text-property (point) 'nomadnet-message)
       (user-error "No message at point")))
 
+(defun nomadnet-conversation--message-starts ()
+  "Return the positions where messages start in the buffer, in order."
+  (let ((starts nil) (pos (point-min)))
+    (while pos
+      (when (get-text-property pos 'nomadnet-message)
+        (push pos starts))
+      (setq pos (next-single-property-change pos 'nomadnet-message)))
+    (nreverse starts)))
+
 (defun nomadnet-conversation-next-message ()
-  "Move to the next message."
+  "Move to the start of the next message."
   (interactive)
-  (let ((pos (next-single-property-change (point) 'nomadnet-message)))
-    (when pos
-      (let ((next (or (and (get-text-property pos 'nomadnet-message) pos)
-                      (next-single-property-change pos 'nomadnet-message))))
-        (when next (goto-char next))))))
+  (let ((next (cl-find-if (lambda (start) (> start (point)))
+                          (nomadnet-conversation--message-starts))))
+    (if next
+        (goto-char next)
+      (message "No next message"))))
 
 (defun nomadnet-conversation-previous-message ()
-  "Move to the previous message."
+  "Move to the start of the previous message.
+From inside a message, move to the start of that message first."
   (interactive)
-  (let ((pos (previous-single-property-change (point) 'nomadnet-message)))
-    (when pos
-      (let ((prev (previous-single-property-change pos 'nomadnet-message)))
-        (goto-char (or prev (point-min)))))))
+  (let ((previous (cl-find-if (lambda (start) (< start (point)))
+                              (reverse (nomadnet-conversation--message-starts)))))
+    (if previous
+        (goto-char previous)
+      (message "No previous message"))))
 
 (defun nomadnet-conversation-save-attachments ()
   "Save attachments of the message at point to the downloads directory."

@@ -340,6 +340,9 @@
 
 ;;;; Requests
 
+(define-error 'reticulum-request-too-large
+  "Request exceeds the link MDU; outbound resources are not implemented yet")
+
 (cl-defstruct (reticulum-request (:constructor reticulum-request--make) (:copier nil))
   id link path (status 'sent) sent-at timeout started-at
   response response-size response-transfer-size (progress 0.0) metadata
@@ -356,8 +359,7 @@ Callbacks receive the `reticulum-request' object.  Returns the request."
          (timeout (or timeout (+ (* (reticulum-link-rtt link) reticulum-link-traffic-timeout-factor)
                                  (* reticulum-link-response-max-grace-time 1.125)))))
     (when (> (length packed) (reticulum-link-mdu link))
-      (error "Request of %d bytes exceeds link MDU; resource requests are not supported yet"
-             (length packed)))
+      (signal 'reticulum-request-too-large (list (length packed) (reticulum-link-mdu link))))
     (let* ((packet (reticulum-link-send link packed reticulum-context-request t))
            (request (reticulum-request--make :id (reticulum-packet-truncated-hash packet)
                                              :link link :path path

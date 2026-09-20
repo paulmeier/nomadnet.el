@@ -35,7 +35,7 @@ test-reticulum:
 
 test-nomadnet:
 	$(EMACS) -Q --batch $(LOAD) -L nomadnet/test \
-	  -l nomadnet-micron-test.el -f ert-run-tests-batch-and-exit
+	  -l nomadnet-micron-test.el -l nomadnet-ui-test.el -f ert-run-tests-batch-and-exit
 
 check: compile test
 
