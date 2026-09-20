@@ -103,7 +103,8 @@ reticulum-interface.el  HDLC + TCP client interface, local instance interface
 reticulum-transport.el  path table, outbound/inbound dispatch, receipts, path requests
 reticulum-link.el       links, requests/responses, keepalive
 reticulum-resource.el   inbound (and small outbound) resources
-lxmf.el                 messages, delivery destination, router (client side), stamps
+lxmf-message.el         message codec, fields, peer announce app data
+lxmf-router.el          delivery destination with ratchets, inbound delivery (client side)
 nomadnet-*.el           existing UI, switched from the bridge to the native API
 ```
 
@@ -116,8 +117,12 @@ Phases 1 to 4 are done and verified live: announces from the public network
 validate, links establish through transport nodes, pages come back as
 compressed resources and render. `nomadnet-native.el` answers the UI's
 requests for status, announces, directory, peer info and browsing, reading and
-writing nomadnet's own files. Remaining: phase 5 (LXMF), file downloads
-(resources with metadata) and the guide text; tracked as repository issues.
+writing nomadnet's own files. Phase 5 is under way: the LXMF codec and the
+inbound half of the router are done and verified live (opportunistic and
+direct delivery from the Python LXMF router through a public transport node,
+with proofs accepted by the sender). Remaining: outbound delivery, stamps,
+propagation node sync, conversation storage, file downloads (resources with
+metadata) and the guide text; tracked as repository issues.
 
 ## Phases
 

@@ -322,14 +322,15 @@ Return non-nil if the part was used."
                      (condition-case nil (funcall (reticulum-request-progress-callback request) request)
                        (error nil))))
                  (plist-get advertisement :request-id)))))
+           ;; The link's resource-concluded callback runs from
+           ;; `reticulum-resource--conclude' for every resource, so it is
+           ;; not passed again as the resource's own callback.
            ((eq (reticulum-link-resource-strategy link) 'app)
             (when (and (reticulum-link-resource-callback link)
                        (funcall (reticulum-link-resource-callback link) advertisement link))
-              (reticulum-resource-accept link advertisement
-                                         (reticulum-link-resource-concluded-callback link))))
+              (reticulum-resource-accept link advertisement)))
            ((eq (reticulum-link-resource-strategy link) 'all)
-            (reticulum-resource-accept link advertisement
-                                       (reticulum-link-resource-concluded-callback link)))))))
+            (reticulum-resource-accept link advertisement))))))
      ((= context reticulum-context-resource)
       (cl-loop for resource in (reticulum-link-incoming-resources link)
                until (reticulum-resource--receive-part resource packet)))
