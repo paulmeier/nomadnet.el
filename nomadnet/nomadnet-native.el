@@ -26,6 +26,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'reticulum)
+(require 'lxmf-message)
+(require 'lxmf-router)
 (require 'nomadnet-core)
 
 (defgroup nomadnet-native nil
@@ -50,6 +52,12 @@ Either `auto' to use every enabled TCPClientInterface from
   "When non-nil, also connect to a running rnsd shared instance on PORT."
   :type '(choice (const nil) integer))
 
+(defcustom nomadnet-native-enforce-ratchets nil
+  "When non-nil, only accept messages encrypted to one of our ratchet keys.
+Messages encrypted to the identity key itself, as sent by peers that have
+not seen an announce with a ratchet, are dropped."
+  :type 'boolean)
+
 (defcustom nomadnet-native-display-name "Anonymous Peer"
   "Display name used when no peer settings file exists."
   :type 'string)
@@ -67,6 +75,8 @@ Either `auto' to use every enabled TCPClientInterface from
 (defvar nomadnet-native--entries (make-hash-table :test #'equal)
   "Directory: source hash -> plist.")
 (defvar nomadnet-native--announces nil "Announce stream, newest first: list of plists.")
+(defvar nomadnet-native--messages nil
+  "Messages received since start, newest first: list of `lxmf-message'.")
 (defvar nomadnet-native--ready nil)
 (defvar nomadnet-native--event-function nil "Called with (EVENT DATA) for events.")
 (defvar nomadnet-native--link nil "The browser's current link.")
@@ -248,15 +258,7 @@ PATH is a Reticulum configuration file."
       (cond
        ((null app-data) nil)
        ((equal kind "node") (reticulum-decode-utf8 app-data))
-       ((equal kind "peer")
-        (if (and (> (length app-data) 0)
-                 (or (<= #x90 (aref app-data 0) #x9f) (= (aref app-data 0) #xdc)))
-            (let ((v (reticulum-msgpack-unpack app-data t)))
-              (let ((dn (and (listp v) (car v))))
-                (cond ((null dn) nil)
-                      ((stringp dn) (string-trim (replace-regexp-in-string "\0" "" (if (multibyte-string-p dn) dn (reticulum-decode-utf8 dn)))))
-                      (t nil))))
-          (reticulum-decode-utf8 app-data)))
+       ((equal kind "peer") (lxmf-display-name-from-app-data app-data))
        ((equal kind "pn")
         (let ((v (reticulum-msgpack-unpack app-data t)))
           (let ((meta (and (listp v) (nth 6 v))))
@@ -267,12 +269,7 @@ PATH is a Reticulum configuration file."
 
 (defun nomadnet-native--stamp-cost-from-app-data (app-data)
   "Return the stamp cost announced in peer APP-DATA, or nil."
-  (condition-case nil
-      (when (and app-data (> (length app-data) 0)
-                 (or (<= #x90 (aref app-data 0) #x9f) (= (aref app-data 0) #xdc)))
-        (let ((v (reticulum-msgpack-unpack app-data t)))
-          (and (listp v) (integerp (nth 1 v)) (nth 1 v))))
-    (error nil)))
+  (lxmf-stamp-cost-from-app-data app-data))
 
 (defun nomadnet-native--on-announce (announce)
   "Record ANNOUNCE plist in the stream and notify the UI."
@@ -344,6 +341,49 @@ PATH is a Reticulum configuration file."
              (or (nomadnet-native--display-name-from-app-data app-data "peer")
                  (nomadnet-native--display-name-from-app-data app-data "node"))))))
 
+;;;; LXMF delivery
+
+(defun nomadnet-native--message-result (message)
+  "Return the plist describing `lxmf-message' MESSAGE for the UI."
+  (let ((source (lxmf-message-source-hash message)))
+    (list :hash (reticulum-hex (lxmf-message-hash message))
+          :source (reticulum-hex source)
+          :source_name (or (nomadnet-native--recall-name source) (format "<%s>" (reticulum-hex source)))
+          :destination (reticulum-hex (lxmf-message-destination-hash message))
+          :title (lxmf-message-title-string message)
+          :content (lxmf-message-content-string message)
+          :timestamp (lxmf-message-timestamp message)
+          :received (lxmf-message-received-at message)
+          :method (lxmf-message-method message)
+          :signature_validated (and (lxmf-message-signature-validated message) t)
+          :unverified_reason (lxmf-message-unverified-reason message)
+          :transport_encryption (lxmf-message-transport-encryption message)
+          :fields (lxmf-message-fields message))))
+
+(defun nomadnet-native--on-message (message)
+  "Record delivered `lxmf-message' MESSAGE and notify the UI."
+  (push message nomadnet-native--messages)
+  (let ((result (nomadnet-native--message-result message)))
+    (reticulum-log 4 "LXMF message %s from %s: %s" (plist-get result :hash)
+                   (plist-get result :source_name)
+                   (cond ((plist-get result :signature_validated) "signature valid")
+                         ((eql (plist-get result :unverified_reason) lxmf-source-unknown) "source unknown")
+                         (t "signature invalid")))
+    (apply #'nomadnet-native--event "message_received" result)))
+
+(defun nomadnet-native--start-lxmf ()
+  "Register our delivery destination with the LXMF router."
+  (setq lxmf-router-enforce-ratchets nomadnet-native-enforce-ratchets)
+  (lxmf-router-init (nomadnet-native--path "storage" "lxmf") #'nomadnet-native--on-message)
+  (lxmf-router-register-delivery-identity nomadnet-native--identity
+                                          (nomadnet-native--setting "display_name") nil))
+
+(defun nomadnet-native--announce ()
+  "Announce our LXMF delivery destination and record the time."
+  (lxmf-router-announce)
+  (nomadnet-native--set-setting "last_announce" (float-time))
+  (list :announced t :lxmf_address (reticulum-hex nomadnet-native--lxmf-hash)))
+
 ;;;; Lifecycle
 
 (defun nomadnet-native-start (event-function)
@@ -355,6 +395,7 @@ PATH is a Reticulum configuration file."
   (nomadnet-native--load-directory)
   (reticulum-identity-load-known (nomadnet-native--path "storage" "emacs_known_destinations"))
   (make-directory (nomadnet-native--path "storage" "cache") t)
+  (nomadnet-native--start-lxmf)
   (reticulum-transport-register-announce-handler nil #'nomadnet-native--on-announce)
   (reticulum-transport-start)
   (let ((interfaces (if (eq nomadnet-native-interfaces 'auto)
@@ -383,6 +424,7 @@ PATH is a Reticulum configuration file."
     (ignore-errors (nomadnet-native--save-directory))
     (ignore-errors (reticulum-identity-save-known (nomadnet-native--path "storage" "emacs_known_destinations")))
     (reticulum-transport-deregister-announce-handler #'nomadnet-native--on-announce)
+    (ignore-errors (lxmf-router-stop))
     (reticulum-transport-stop)
     (setq nomadnet-native--running nil
           nomadnet-native--ready nil)))
@@ -397,7 +439,7 @@ PATH is a Reticulum configuration file."
         :backend "native"
         :version "native"
         :rns_version "reticulum.el"
-        :lxmf_version "not yet"
+        :lxmf_version "lxmf.el"
         :configdir (expand-file-name nomadnet-native-config-directory)
         :display_name (nomadnet-native--setting "display_name")
         :lxmf_address (reticulum-hex nomadnet-native--lxmf-hash)
@@ -725,7 +767,9 @@ CURRENT is the connected destination for relative URLs."
          (let ((name (string-trim (or (plist-get params :name) ""))))
            (when (string-empty-p name) (error "A display name is required"))
            (nomadnet-native--set-setting "display_name" (reticulum-msgpack-str name))
+           (lxmf-router-set-display-name name)
            (funcall callback (list :display_name name) nil)))
+        ("announce" (funcall callback (nomadnet-native--announce) nil))
         ("browser.get" (nomadnet-native--browser-get params callback))
         ("browser.disconnect"
          (when nomadnet-native--link
@@ -745,7 +789,7 @@ CURRENT is the connected destination for relative URLs."
         ("quit" (funcall callback (list :quitting t) nil))
         ((or "guide.topics" "guide.get")
          (funcall callback nil "The guide is not available yet (see the repository issues)"))
-        ((or "announce" "conversations.list" "conversation.messages" "conversation.send"
+        ((or "conversations.list" "conversation.messages" "conversation.send"
              "conversation.new" "conversation.mark_read" "conversation.delete"
              "conversation.purge_failed" "conversation.clear_history" "conversation.save_attachments"
              "lxmf.sync" "lxmf.sync_status" "lxmf.cancel_sync" "pn.set" "node.announce")

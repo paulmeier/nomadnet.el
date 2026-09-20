@@ -11,3 +11,11 @@ without ratchets, complete announce packets (valid and tampered) and bzip2
 streams. The file is a fixed fixture; the tests compare this implementation
 against it. Add new vectors by recording them from the reference
 implementation and appending to the JSON by hand.
+
+The `lxmf` section is the exception: `gen_vectors.py` regenerates it from the
+installed `rns` and `lxmf` packages (packed messages with and without stamps
+and fields, opportunistic payloads encrypted with and without a ratchet, peer
+announce app data and a ratchet file) and leaves the other sections alone.
+Run it with a Python that has both packages installed:
+
+    python3 gen_vectors.py

@@ -62,7 +62,7 @@ Keys: :timestamp :next-hop :hops :interface :expires :packet-hash.")
   identity direction type app-name aspects name hash name-hash hexhash
   packet-callback link-established-callback
   (accepts-links t)
-  ratchets ratchets-path default-app-data
+  ratchets ratchets-path (enforce-ratchets nil) default-app-data
   (proof-strategy 'none) (links nil) stamp-cost display-name)
 
 (defun reticulum-destination-create (identity direction type app-name &rest aspects)
@@ -102,7 +102,8 @@ Returns (PLAINTEXT . RATCHET-ID) or nil."
     ((pred (= reticulum-destination-plain)) (cons ciphertext nil))
     ((pred (= reticulum-destination-single))
      (reticulum-identity-decrypt (reticulum-destination-identity destination) ciphertext
-                                 (reticulum-destination-ratchets destination)))
+                                 (reticulum-destination-ratchets destination)
+                                 (reticulum-destination-enforce-ratchets destination)))
     (_ nil)))
 
 ;;;; Path table
@@ -291,14 +292,18 @@ ASPECT-FILTER is a full name like \"lxmf.delivery\" or nil for all announces."
 
 (defun reticulum-transport-outbound (packet &optional create-receipt)
   "Transmit PACKET, rewriting to header type 2 when a next hop is known.
-With CREATE-RECEIPT, register and return a receipt for proof tracking."
+With CREATE-RECEIPT, register and return a receipt for proof tracking.
+When the packet's interface slot is set, it names the interface the packet
+must leave on (RNS's attached interface); otherwise the interface is chosen
+from the packet's link, the path table or the first online interface."
   (let* ((destination-hash (reticulum-packet-destination-hash packet))
          (raw (reticulum-packet-raw packet))
          (entry (and (/= (reticulum-packet-packet-type packet) reticulum-packet-announce)
                      (/= (reticulum-packet-destination-type packet) reticulum-destination-plain)
                      (gethash destination-hash reticulum-transport-path-table)))
          (link (reticulum-packet-link packet))
-         (interface (cond ((and link (reticulum-link-interface link)))
+         (interface (cond ((reticulum-packet-interface packet))
+                          ((and link (reticulum-link-interface link)))
                           (entry (plist-get entry :interface))
                           (t (car reticulum-interfaces))))
          (receipt nil))
@@ -350,6 +355,23 @@ With CREATE-RECEIPT, register and return a receipt for proof tracking."
                                         :destination destination)))
     (reticulum-transport-outbound packet create-receipt)
     packet))
+
+;;;; Proofs
+
+(defun reticulum-transport-prove-packet (packet destination)
+  "Send a proof for PACKET received on inbound DESTINATION.
+The proof carries the packet hash and its signature by the destination
+identity, addressed to the truncated packet hash, and leaves on the
+interface the packet arrived on, as RNS.Identity.prove does."
+  (let* ((identity (reticulum-destination-identity destination))
+         (hash (reticulum-packet-hash packet))
+         (proof (reticulum-packet-make :packet-type reticulum-packet-proof
+                                       :destination-type reticulum-destination-single
+                                       :destination-hash (substring hash 0 reticulum-truncated-hash-length)
+                                       :data (concat hash (reticulum-identity-sign identity hash))
+                                       :interface (reticulum-packet-interface packet))))
+    (reticulum-transport-outbound proof)
+    proof))
 
 ;;;; Path requests
 

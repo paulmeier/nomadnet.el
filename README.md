@@ -14,8 +14,10 @@ hosted on Nomad Network nodes.
 
 Everything is Emacs Lisp: Reticulum (crypto, transport, links, resources) in
 `reticulum/`, the client in `nomadnet/`. Browsing nodes, the announce stream
-and the directory of known nodes work today; LXMF messaging is in progress
-(see the repository issues and `docs/native-plan.md`).
+and the directory of known nodes work today. LXMF messages sent to your
+address arrive and validate (opportunistic and direct delivery, with
+ratchets); sending, propagation node sync and conversation storage are in
+progress (see the repository issues and `docs/native-plan.md`).
 
 The client shares nomadnet's configuration directory, so your identity, known
 nodes, announce stream and page cache are the same in Emacs and in the
@@ -108,6 +110,18 @@ Long messages wrap at word boundaries. Composed messages are tagged as
 markdown to match nomadnet's default; see `nomadnet-compose-renderer`.
 Messages tagged as micron are rendered with the micron renderer.
 
+### Receiving LXMF messages
+
+The client registers your `lxmf.delivery` destination with ratchets stored in
+nomadnet's format (`storage/lxmf/ratchets/`), so announces from Emacs carry a
+ratchet key exactly as nomadnet's do, and peers can deliver messages to the
+Emacs identity by a single packet or over a link. `M-x nomadnet-announce-now`
+announces the address. Received messages are announced in the echo area and
+handed to `nomadnet-event-hook` as `message_received`; delivered message hashes
+are remembered in `storage/lxmf/local_deliveries`, as nomadnet does, so a
+message is never shown twice. Set `nomadnet-native-enforce-ratchets` to refuse
+messages encrypted to the identity key instead of a ratchet.
+
 ## Micron renderer
 
 `nomadnet-micron.el` is a pure Emacs Lisp port of nomadnet's micron parser:
@@ -121,9 +135,11 @@ as a string. Heading colours are the faces `nomadnet-micron-heading-1..3`.
 
 The library implements X25519, Ed25519, HKDF, RNS tokens (AES-256-CBC +
 HMAC via GnuTLS), msgpack, HDLC framed TCP interfaces, a leaf transport with
-path table and path requests, links with requests/responses, and inbound
-resources. It is verified against vectors recorded from the reference Python
-implementation (`make vectors` regenerates them) and against the live network.
+path table and path requests, links with requests/responses, inbound
+resources, and the LXMF message format with inbound delivery. It is verified
+against vectors recorded from the reference Python implementation
+(`reticulum/test/gen_vectors.py` regenerates the LXMF ones) and against the
+live network.
 The curve arithmetic runs in Emacs Lisp on bignums and is not constant time.
 
 ## Development
@@ -135,9 +151,6 @@ make test         # ERT tests for reticulum (test-reticulum) and nomadnet (test-
 
 `reticulum/test/vectors.json` is a fixed fixture of reference values (see
 `reticulum/test/README.md`).
-
-```
-```
 
 ## Not yet translated
 

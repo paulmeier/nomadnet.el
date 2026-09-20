@@ -21,7 +21,8 @@
 ;; A client implementation of the Reticulum Network Stack
 ;; <https://reticulum.network> in Emacs Lisp: identities, destinations,
 ;; announces, a leaf transport over HDLC framed TCP interfaces, encrypted
-;; links with requests and responses, and inbound resources.  The
+;; links with requests and responses, inbound resources, and the LXMF
+;; message format with inbound delivery (the `lxmf-' modules).  The
 ;; cryptography (X25519, Ed25519, HKDF, AES-CBC tokens) runs on Emacs
 ;; bignums and GnuTLS; the wire format is compatible with RNS 1.5.
 ;;
@@ -38,6 +39,8 @@
 ;;   reticulum-link       links, requests, responses, keepalives
 ;;   reticulum-resource   inbound resources
 ;;   reticulum-bz2        bzip2 decoder in Lisp (optionally the system utility)
+;;   lxmf-message         LXMF message codec and peer announce data
+;;   lxmf-router          LXMF delivery destination, ratchets, inbound delivery
 ;;
 ;; Typical use:
 ;;   (require 'reticulum)
@@ -57,6 +60,8 @@
 (require 'reticulum-bz2)
 (require 'reticulum-link)
 (require 'reticulum-resource)
+(require 'lxmf-message)
+(require 'lxmf-router)
 
 (defconst reticulum-version "0.1.0" "Version of the reticulum.el library.")
 

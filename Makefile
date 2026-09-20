@@ -3,7 +3,8 @@ EMACS ?= emacs
 RETICULUM_SOURCES := reticulum/reticulum-bytes.el reticulum/reticulum-msgpack.el \
   reticulum/reticulum-crypto.el reticulum/reticulum-packet.el reticulum/reticulum-identity.el \
   reticulum/reticulum-interface.el reticulum/reticulum-transport.el reticulum/reticulum-bz2.el \
-  reticulum/reticulum-link.el reticulum/reticulum-resource.el reticulum/reticulum.el
+  reticulum/reticulum-link.el reticulum/reticulum-resource.el reticulum/reticulum.el \
+  reticulum/lxmf-message.el reticulum/lxmf-router.el
 
 NOMADNET_SOURCES := nomadnet/nomadnet-core.el nomadnet/nomadnet-native.el \
   nomadnet/nomadnet-micron.el nomadnet/nomadnet-browser.el nomadnet/nomadnet-conversations.el \
