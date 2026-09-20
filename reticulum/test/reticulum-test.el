@@ -281,10 +281,61 @@
 ;;;; bz2
 
 (ert-deftest reticulum-bz2-vectors ()
+  "The Lisp decoder reproduces the reference data."
+  (let ((reticulum-bz2-program nil))
+    (dolist (case (reticulum-test--vec :bz2))
+      (should (equal (reticulum-bz2-decompress (reticulum-unhex (plist-get case :compressed)))
+                     (reticulum-unhex (plist-get case :data)))))))
+
+(ert-deftest reticulum-bz2-program-vectors ()
+  "The optional program fast path reproduces the reference data."
+  (let ((reticulum-bz2-program "bzip2"))
+    (skip-unless (reticulum-bz2-available-p))
+    (dolist (case (reticulum-test--vec :bz2))
+      (should (equal (reticulum-bz2-decompress (reticulum-unhex (plist-get case :compressed)))
+                     (reticulum-unhex (plist-get case :data)))))))
+
+(ert-deftest reticulum-bz2-errors ()
+  "Corrupt input is rejected rather than decoded to garbage."
+  (let* ((reticulum-bz2-program nil)
+         (case (seq-find (lambda (c) (equal (plist-get c :name) "short")) (reticulum-test--vec :bz2)))
+         (good (reticulum-unhex (plist-get case :compressed))))
+    (should-error (reticulum-bz2-decompress (substring good 0 20)))
+    (should-error (reticulum-bz2-decompress (concat "XX" (substring good 2))))
+    ;; Bytes 10..13 hold the block CRC.
+    (let ((bad (copy-sequence good)))
+      (aset bad 12 (logxor (aref bad 12) 1))
+      (should (equal (cadr (should-error (reticulum-bz2-decompress bad))) "bzip2: block CRC mismatch")))
+    ;; Bytes 4..9 hold the block magic.
+    (let ((bad (copy-sequence good)))
+      (aset bad 6 0)
+      (should-error (reticulum-bz2-decompress bad)))))
+
+(ert-deftest reticulum-bz2-multiple-blocks ()
+  "Small blocks, several per stream, and concatenated streams all decode."
   (skip-unless (reticulum-bz2-available-p))
-  (dolist (case (reticulum-test--vec :bz2))
-    (should (equal (reticulum-bz2-decompress (reticulum-unhex (plist-get case :compressed)))
-                   (reticulum-unhex (plist-get case :data))))))
+  (let* ((reticulum-bz2-program nil)
+         (words ["reticulum" "nomadnet" "micron" "page\n" "`!bold`!" " " "\n"])
+         (state 12345)
+         (payload (with-temp-buffer
+                    (set-buffer-multibyte nil)
+                    (dotimes (_ 60000)
+                      ;; A small LCG keeps the input deterministic.
+                      (setq state (% (+ (* state 1103515245) 12345) 2147483648))
+                      (insert (aref words (% (ash state -16) (length words)))))
+                    (buffer-string)))
+         (compressed (reticulum-bz2--call payload "-1c")))
+    (should (> (length payload) 200000))
+    (should (equal (reticulum-bz2-decompress compressed) payload))
+    (should (equal (reticulum-bz2-decompress (concat compressed compressed))
+                   (concat payload payload)))))
+
+(ert-deftest reticulum-bz2-incompressible ()
+  "Random data, which stresses long Huffman codes, round trips."
+  (skip-unless (reticulum-bz2-available-p))
+  (let* ((reticulum-bz2-program nil)
+         (payload (concat (reticulum-random-bytes 50000) (make-string 3000 ?z) (reticulum-random-bytes 5000))))
+    (should (equal (reticulum-bz2-decompress (reticulum-bz2-compress payload)) payload))))
 
 ;;;; links
 

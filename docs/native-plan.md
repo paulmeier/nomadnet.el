@@ -96,7 +96,7 @@ under the Reticulum License; the client is GPL-3 because it ports nomadnet code.
 reticulum-bytes.el      unibyte helpers, hex, int conversions, random
 reticulum-msgpack.el    msgpack pack/unpack (umsgpack compatible)
 reticulum-crypto.el     sha, hmac, hkdf, token, x25519, ed25519, pkcs7
-reticulum-bz2.el        bz2 decompressor
+reticulum-bz2.el        bz2 decoder in Lisp (bzip2 binary optional)
 reticulum-identity.el   identities, known destinations, ratchets, announces
 reticulum-packet.el     packet pack/unpack/hash
 reticulum-interface.el  HDLC + TCP client interface, local instance interface

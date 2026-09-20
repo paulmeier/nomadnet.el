@@ -24,7 +24,6 @@ nodes, announce stream and page cache are the same in Emacs and in the
 ## Requirements
 
 - Emacs 28.1 or newer, built with GnuTLS (all common builds are)
-- The `bzip2` command line tool (present on macOS and Linux)
 - A Reticulum configuration file whose `TCPClientInterface` entries point at
   reachable transport nodes; they are read from `~/.reticulum/config` (see
   `nomadnet-native-interfaces` to configure interfaces by hand)
