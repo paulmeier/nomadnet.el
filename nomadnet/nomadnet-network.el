@@ -15,12 +15,13 @@
 ;; Announce stream keys:
 ;;   RET act on entry (browse node, message peer, select propagation node)
 ;;   b browse   m message   s save to directory   P use as propagation node
-;;   d remove from stream   i info   f cycle kind filter   g refresh
+;;   d remove from stream   i info   f cycle kind filter   / search by name
+;;   g refresh
 ;;
 ;; Known nodes keys:
 ;;   RET / b browse   m message operator   d forget   t toggle trust
-;;   I toggle identify on connect   r set sort rank   P use as propagation node
-;;   i info   g refresh
+;;   I toggle identify on connect   r set sort rank   e edit notes
+;;   P use as propagation node   i info   g refresh
 
 ;;; Code:
 
@@ -36,6 +37,10 @@
 (defconst nomadnet-announces-buffer-name "*NomadNet Announces*")
 
 (defvar-local nomadnet-announces--filter nil "Kind filter: nil, \"node\", \"peer\" or \"pn\".")
+(defvar-local nomadnet-announces--search nil
+  "Search text restricting the announce stream, or nil.
+Like the search box of nomadnet's announce stream, it matches
+case-insensitively against the announced name and the address.")
 
 (defvar nomadnet-announces-mode-map
   (let ((map (make-sparse-keymap)))
@@ -51,6 +56,7 @@
     (define-key map (kbd "d") #'nomadnet-announces-remove)
     (define-key map (kbd "i") #'nomadnet-announces-peer-info)
     (define-key map (kbd "f") #'nomadnet-announces-cycle-filter)
+    (define-key map (kbd "/") #'nomadnet-announces-search)
     (define-key map (kbd "g") #'nomadnet-announces-refresh)
     map)
   "Keymap for `nomadnet-announces-mode'.")
@@ -59,16 +65,44 @@
  '(("RET" . nomadnet-announces-info) ("b" . nomadnet-announces-browse) ("c" . nomadnet-announces-act)
    ("m" . nomadnet-announces-message) ("s" . nomadnet-announces-save) ("P" . nomadnet-announces-use-propagation-node)
    ("d" . nomadnet-announces-remove) ("i" . nomadnet-announces-peer-info) ("f" . nomadnet-announces-cycle-filter)
-   ("g" . nomadnet-announces-refresh) ("q" . quit-window)
+   ("/" . nomadnet-announces-search) ("g" . nomadnet-announces-refresh) ("q" . quit-window)
    ("<mouse-1>" . nomadnet-announces-mouse-info) ("<mouse-2>" . nomadnet-announces-mouse-info)))
 
 (define-derived-mode nomadnet-announces-mode tabulated-list-mode "NomadNet-Announces"
   "Major mode listing announces received from the network."
   (setq tabulated-list-format [("Age" 5 nil :right-align t) ("Kind" 5 t) ("Name" 30 t)
                                ("Trust" 9 t) ("Hops" 4 nil :right-align t) ("Address" 32 t)]
-        tabulated-list-padding 1)
+        tabulated-list-padding 1
+        mode-line-process '(:eval (nomadnet-announces--mode-line)))
   (tabulated-list-init-header)
   (add-hook 'nomadnet-event-hook #'nomadnet-announces--on-event))
+
+(defun nomadnet-announces--mode-line ()
+  "Return the mode line suffix describing the active filter and search."
+  (concat (when nomadnet-announces--filter (format " [%s]" nomadnet-announces--filter))
+          (when nomadnet-announces--search (format " /%s" nomadnet-announces--search))))
+
+(defun nomadnet-announces--match-p (announce search)
+  "Return non-nil when ANNOUNCE plist matches SEARCH text.
+SEARCH is matched case-insensitively as a substring of the announced
+name or of the destination hash; an empty or nil SEARCH matches all."
+  (or (null search) (string-empty-p search)
+      (let ((case-fold-search t)
+            (needle (regexp-quote search)))
+        (or (string-match-p needle (or (plist-get announce :name) ""))
+            (string-match-p needle (or (plist-get announce :hash) ""))))))
+
+(defun nomadnet-announces-search (search)
+  "Show only announces whose name or address contains SEARCH.
+An empty SEARCH shows the whole stream again."
+  (interactive
+   (list (read-string "Search announces (empty to clear): " nomadnet-announces--search)))
+  (setq nomadnet-announces--search (let ((text (string-trim search)))
+                                     (unless (string-empty-p text) text)))
+  (message "%s" (if nomadnet-announces--search
+                    (format "Showing announces matching %S" nomadnet-announces--search)
+                  "Showing all announces"))
+  (nomadnet-announces-refresh))
 
 (defun nomadnet-announces--entry (announce)
   "Return a tabulated list entry for ANNOUNCE plist."
@@ -100,7 +134,10 @@
                                 (if err
                                     (message "Nomad Network: %s" err)
                                   (setq tabulated-list-entries
-                                        (mapcar #'nomadnet-announces--entry result))
+                                        (mapcar #'nomadnet-announces--entry
+                                                (cl-remove-if-not
+                                                 (lambda (a) (nomadnet-announces--match-p a nomadnet-announces--search))
+                                                 result)))
                                   (tabulated-list-print t))))))))))
 
 (defvar nomadnet-announces--refresh-timer nil)
@@ -412,6 +449,7 @@
     (define-key map (kbd "t") #'nomadnet-known-nodes-toggle-trust)
     (define-key map (kbd "I") #'nomadnet-known-nodes-toggle-identify)
     (define-key map (kbd "r") #'nomadnet-known-nodes-set-rank)
+    (define-key map (kbd "e") #'nomadnet-known-nodes-edit-notes)
     (define-key map (kbd "P") #'nomadnet-known-nodes-use-propagation-node)
     (define-key map (kbd "i") #'nomadnet-known-nodes-info)
     (define-key map (kbd "g") #'nomadnet-known-nodes-refresh)
@@ -421,14 +459,16 @@
 (nomadnet-evil-integrate 'nomadnet-known-nodes-mode nomadnet-known-nodes-mode-map
  '(("RET" . nomadnet-known-nodes-browse) ("b" . nomadnet-known-nodes-browse) ("m" . nomadnet-known-nodes-message)
    ("d" . nomadnet-known-nodes-forget) ("t" . nomadnet-known-nodes-toggle-trust) ("I" . nomadnet-known-nodes-toggle-identify)
-   ("r" . nomadnet-known-nodes-set-rank) ("P" . nomadnet-known-nodes-use-propagation-node) ("i" . nomadnet-known-nodes-info)
+   ("r" . nomadnet-known-nodes-set-rank) ("e" . nomadnet-known-nodes-edit-notes)
+   ("P" . nomadnet-known-nodes-use-propagation-node) ("i" . nomadnet-known-nodes-info)
    ("g" . nomadnet-known-nodes-refresh) ("q" . quit-window)
    ("<mouse-1>" . nomadnet-known-nodes-mouse-browse) ("<mouse-2>" . nomadnet-known-nodes-mouse-browse)))
 
 (define-derived-mode nomadnet-known-nodes-mode tabulated-list-mode "NomadNet-Nodes"
   "Major mode listing known Nomad Network nodes."
   (setq tabulated-list-format [("Name" 30 t) ("Trust" 9 t) ("Hops" 4 nil :right-align t)
-                               ("Rank" 4 nil :right-align t) ("Ident" 5 nil) ("Address" 32 t)]
+                               ("Rank" 4 nil :right-align t) ("Ident" 5 nil) ("Address" 32 t)
+                               ("Notes" 30 nil)]
         tabulated-list-padding 1)
   (tabulated-list-init-header))
 
@@ -443,7 +483,9 @@
                   (if hops (number-to-string hops) "?")
                   (if (plist-get node :sort_rank) (number-to-string (plist-get node :sort_rank)) "")
                   (if (plist-get node :identify) "yes" "")
-                  (propertize hash 'face 'nomadnet-hash-face)))))
+                  (propertize hash 'face 'nomadnet-hash-face)
+                  (propertize (replace-regexp-in-string "\n" " " (or (plist-get node :notes) ""))
+                              'face 'shadow)))))
 
 (defun nomadnet-known-nodes-refresh ()
   "Refresh the known nodes list."
@@ -525,6 +567,22 @@
   (let ((hash (nomadnet-known-nodes--hash-at-point)))
     (nomadnet-with-result "directory.remember"
         (list :hash hash :sort_rank (if (string-empty-p rank) nil (string-to-number rank)))
+      (nomadnet-known-nodes-refresh))))
+
+(defun nomadnet-known-nodes-edit-notes (notes)
+  "Set the NOTES stored with the node at point.
+Notes are saved in nomadnet's directory, so the nomadnet program shows
+them too.  Newlines are entered with \\<minibuffer-local-map>\\[newline]; \
+an empty string clears the notes."
+  (interactive
+   (let* ((hash (nomadnet-known-nodes--hash-at-point))
+          (entry (nomadnet-call "directory.entry" (list :hash hash))))
+     (list (read-string "Notes (empty to clear): " (or (plist-get entry :notes) "")))))
+  (let ((hash (nomadnet-known-nodes--hash-at-point)))
+    (nomadnet-with-result "directory.remember" (list :hash hash :notes notes)
+      (message "%s" (if (string-empty-p notes)
+                        (format "Cleared notes of %s" (or (plist-get result :display_name) hash))
+                      (format "Saved notes of %s" (or (plist-get result :display_name) hash))))
       (nomadnet-known-nodes-refresh))))
 
 (defun nomadnet-known-nodes-use-propagation-node ()

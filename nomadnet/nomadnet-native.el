@@ -26,6 +26,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'reticulum)
+(require 'nomadnet-core)
 
 (defgroup nomadnet-native nil
   "Native Emacs Lisp Nomad Network backend."
@@ -408,7 +409,9 @@ PATH is a Reticulum configuration file."
         :logfile (nomadnet-native--path "logfile")
         :interfaces (mapcar (lambda (i) (list :name (reticulum-interface-name i)
                                               :online (reticulum-interface-online i)
-                                              :rx (reticulum-interface-rx i) :tx (reticulum-interface-tx i)))
+                                              :rx (reticulum-interface-rx i) :tx (reticulum-interface-tx i)
+                                              :rxbytes (reticulum-interface-rxbytes i)
+                                              :txbytes (reticulum-interface-txbytes i)))
                             reticulum-interfaces)
         :paths (hash-table-count reticulum-transport-path-table)))
 
@@ -533,6 +536,11 @@ CURRENT is the connected destination for relative URLs."
                         (setq done t)
                         (funcall callback nil))))))))))))
 
+(defun nomadnet-native-request-too-large-message (size mdu)
+  "Return the error message for a request of SIZE bytes on a link with MDU."
+  (format "%s: the submitted fields need %d bytes but a single packet carries at most %d.  Sending larger requests needs outbound resources, which are not implemented yet (see issue #5).  Shorten the field values and try again"
+          nomadnet-request-too-large-prefix size mdu))
+
 (defun nomadnet-native--browser-get (params callback)
   "Fetch the page described by PARAMS and call CALLBACK with (RESULT ERROR)."
   (condition-case err
@@ -595,6 +603,8 @@ CURRENT is the connected destination for relative URLs."
                                                          :size (reticulum-request-response-size req)
                                                          :transfer_size (reticulum-request-response-transfer-size req)))
                       (plist-get params :timeout))
+                   (reticulum-request-too-large
+                    (funcall callback nil (apply #'nomadnet-native-request-too-large-message (cdr err2))))
                    (error (funcall callback nil (error-message-string err2))))
                  (nomadnet-native--browser-status "request_sent" :path path))))))))
     (error (funcall callback nil (error-message-string err)))))
